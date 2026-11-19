@@ -1,0 +1,44 @@
+{
+  "name": "cocos-resource-inspector",
+  "package_version": 2,
+  "version": "1.1.1",
+  "description": "资源与 Prefab 体检：引用定位、丢失引用检查、删除影响预览、资源大小统计",
+  "author": "Cocos Resource Inspector",
+  "license": "MIT",
+  "editor": ">=3.8.0 <3.9.0",
+  "main": "./main.js",
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "build": "node scripts/build.cjs",
+    "package": "npm run build && node scripts/package.cjs",
+    "scan": "node scripts/scan.cjs",
+    "check:editor": "node scripts/check-editor.cjs"
+  },
+  "panels": {
+    "default": {
+      "title": "资源 / Prefab 体检",
+      "type": "dockable",
+      "main": "./panels/default",
+      "size": { "min-width": 860, "min-height": 560, "width": 1240, "height": 820 },
+      "flags": { "resizable": true }
+    }
+  },
+  "contributions": {
+    "scene": { "script": "./scene.js" },
+    "menu": [{ "path": "i18n:menu.extension", "label": "资源 / Prefab 体检", "message": "open-panel" }],
+    "messages": {
+      "open-panel": { "methods": ["openPanel"] },
+      "get-state": { "methods": ["getState"] },
+      "scan-project": { "methods": ["scanProject"] },
+      "cancel-scan": { "methods": ["cancelScan"] },
+      "query-assets": { "methods": ["queryAssets"] },
+      "query-issues": { "methods": ["queryIssues"] },
+      "query-references": { "methods": ["queryReferences"] },
+      "get-impact": { "methods": ["getImpact"] },
+      "get-size-stats": { "methods": ["getSizeStats"] },
+      "locate-asset": { "methods": ["locateAsset"] },
+      "locate-node": { "methods": ["locateNode"] },
+      "export-report": { "methods": ["exportReport"] }
+    }
+  }
+}
