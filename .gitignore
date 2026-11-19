@@ -1,5 +1,4 @@
 dist/
-release/
 RIReports/
 node_modules/
 *.log

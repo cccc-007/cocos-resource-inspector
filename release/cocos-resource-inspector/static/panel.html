@@ -1,0 +1,49 @@
+<div id="app">
+  <header class="header">
+    <div><span class="eyebrow">COCOS CREATOR · RESOURCE INSPECTOR</span><h1>资源 / Prefab 体检</h1><p class="subtitle">检查引用，定位问题，预览删除影响。</p></div>
+    <span id="scan-status" class="badge">尚未扫描</span>
+  </header>
+  <div class="toolbar main-toolbar">
+    <button id="scan" class="primary">扫描项目</button><button id="cancel" disabled>取消扫描</button>
+    <span class="toolbar-spacer"></span><button id="export-html" disabled>导出 HTML</button><button id="export-json" disabled>导出 JSON</button>
+  </div>
+  <div id="progress-area" hidden><div class="progress-line"><span id="progress-label">准备扫描</span><span id="progress-count"></span></div><progress id="progress" max="1" value="0" aria-label="扫描进度"></progress></div>
+  <div id="dirty-notice" class="notice" hidden>项目资源已变更，当前结果来自上次扫描。请重新扫描后再判断引用和删除影响。</div>
+  <div id="partial-notice" class="notice" hidden>本次扫描不完整，请查看底部的覆盖限制；引用和删除影响可能有遗漏。</div>
+  <p id="status" class="status" role="status" aria-live="polite">点击“扫描项目”，建立资源与引用索引。</p>
+  <div id="metrics" class="metrics" aria-label="体检统计"></div>
+  <div class="workspace">
+    <aside class="asset-sidebar">
+      <div class="section-heading"><h2>项目资源</h2><span id="asset-total" class="muted">0 项</span></div>
+      <label class="sr-only" for="asset-search">搜索资源名称、路径或 UUID</label><input id="asset-search" type="search" placeholder="搜索名称、路径或 UUID" autocomplete="off" spellcheck="false">
+      <div class="asset-sort"><label for="asset-sort">排序</label><select id="asset-sort"><option value="path">按路径</option><option value="size-desc">体积从大到小</option><option value="size-asc">体积从小到大</option></select></div>
+      <p class="helper">选中资源，查看引用或删除影响。</p>
+      <div id="assets" class="asset-list" role="listbox" aria-label="项目资源"><div class="empty">扫描后显示项目资源</div></div>
+      <div class="pagination"><button id="asset-prev" aria-label="上一页资源" disabled>上一页</button><span id="asset-page">0 / 0</span><button id="asset-next" aria-label="下一页资源" disabled>下一页</button></div>
+    </aside>
+    <main class="results">
+      <nav class="tabs" role="tablist" aria-label="检查内容"><button id="tab-issues" data-tab="issues" role="tab" aria-controls="issues" aria-selected="true" class="active">体检问题</button><button id="tab-references" data-tab="references" role="tab" aria-controls="references" aria-selected="false">引用定位</button><button id="tab-impact" data-tab="impact" role="tab" aria-controls="impact" aria-selected="false">删除影响</button><button id="tab-sizes" data-tab="sizes" role="tab" aria-controls="sizes" aria-selected="false">资源大小</button></nav>
+      <section id="issues" class="tab-content" role="tabpanel" aria-labelledby="tab-issues">
+        <div class="toolbar filters"><label class="sr-only" for="issue-search">搜索体检问题</label><input id="issue-search" type="search" placeholder="搜索问题、路径或节点" autocomplete="off"><label class="sr-only" for="severity">问题级别</label><select id="severity"><option value="">全部级别</option><option value="error">错误</option><option value="warning">警告</option><option value="info">提示</option></select><span id="issue-total" class="muted">0 条问题</span></div>
+        <div id="issue-table" class="table-region"><div class="empty">扫描后显示检查结果</div></div>
+        <div class="pagination"><button id="issue-prev" disabled>上一页</button><span id="issue-page">0 / 0</span><button id="issue-next" disabled>下一页</button></div>
+      </section>
+      <section id="references" class="tab-content" role="tabpanel" aria-labelledby="tab-references" hidden>
+        <div id="reference-selection" class="selection empty">请在左侧选择一个资源</div>
+        <div class="toolbar filters"><label for="reference-direction">查看</label><select id="reference-direction"><option value="incoming">谁引用了它</option><option value="outgoing">它引用了谁</option></select><span id="reference-total" class="muted">0 条引用</span></div>
+        <div id="reference-table" class="table-region"><div class="empty">选择资源后显示引用位置</div></div>
+        <div class="pagination"><button id="reference-prev" disabled>上一页</button><span id="reference-page">0 / 0</span><button id="reference-next" disabled>下一页</button></div>
+      </section>
+      <section id="impact" class="tab-content" role="tabpanel" aria-labelledby="tab-impact" hidden>
+        <div id="impact-selection" class="selection empty">请在左侧选择一个资源</div>
+        <div class="notice">这里只预览删除影响，不执行删除。静态索引无法证明动态加载的资源可以安全删除。</div>
+        <div id="impact-body"><div class="empty">选择资源后查看哪些资源可能受影响</div></div>
+      </section>
+      <section id="sizes" class="tab-content" role="tabpanel" aria-labelledby="tab-sizes" hidden>
+        <p class="helper size-scope">统计 assets/ 下源文件的磁盘字节，不含 .meta；纹理、SpriteFrame 等子资源随主资源计入，不重复统计。此处大小不是构建后包体大小或运行时显存占用。</p>
+        <div id="size-body"><div class="empty">扫描后显示资源大小</div></div>
+      </section>
+    </main>
+  </div>
+  <footer><details><summary>扫描范围与判断限制</summary><p>结果来自资源数据库及已保存的可识别序列化资源。脚本运行逻辑、动态拼接路径、运行时生成引用和项目外部资源可能无法识别。“无静态入向引用”只代表待确认候选，需要结合资源加载方式与打包配置检查。</p><div id="limitations"></div></details><p class="helper">上次扫描：<span id="scanned-at">尚未扫描</span> · 报告目录：<span id="output-directory">—</span></p></footer>
+</div>
