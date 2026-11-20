@@ -19,13 +19,14 @@
       "title": "资源 / Prefab 体检",
       "type": "dockable",
       "main": "./panels/default",
+      "icon": "./static/icon.png",
       "size": { "min-width": 860, "min-height": 560, "width": 1240, "height": 820 },
       "flags": { "resizable": true }
     }
   },
   "contributions": {
     "scene": { "script": "./scene.js" },
-    "menu": [{ "path": "i18n:menu.extension", "label": "资源 / Prefab 体检", "message": "open-panel" }],
+    "menu": [{ "path": "i18n:menu.extension", "label": "资源 / Prefab 体检", "icon": "./static/icon.png", "message": "open-panel" }],
     "messages": {
       "open-panel": { "methods": ["openPanel"] },
       "get-state": { "methods": ["getState"] },
