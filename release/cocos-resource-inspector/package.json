@@ -1,7 +1,7 @@
 {
   "name": "cocos-resource-inspector",
   "package_version": 2,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "资源与 Prefab 体检：未使用图片、音频和动画检测、引用定位、丢失引用检查、删除影响预览、资源大小统计",
   "author": "Cocos Resource Inspector",
   "license": "MIT",

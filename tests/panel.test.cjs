@@ -42,7 +42,7 @@ const state = { status: 'ready', revision: 1, dirty: false, outputDirectory: 'D:
 const malicious = '<img src=x onerror=alert(1)>';
 const issues = Array.from({ length: 101 }, (_, i) => ({ id: `issue-${i}`, severity: 'warning', code: 'MISSING', message: i ? `issue ${i}` : malicious, sourceUuid: 'uuid-0', sourceUrl: assets[0].url, nodePath: 'Root/Child', component: 'cc.Sprite', property: 'spriteFrame', nodeId: 'node-id', nodeLocator: { version: 1, segments: [{ name: 'Root', fileId: 'root-file-id' }] }, prefabTarget: { localID: ['component-file-id'] } }));
 const calls = []; let oldResolve, oldRequested = false, oldAssetsResolve, oldSizesResolve;
-const sizeStats = totalBytes => ({ totalBytes, totalFiles: 200, unknownFiles: 2, byType: [{ type: 'image', count: 100, bytes: totalBytes / 2 }, { type: 'prefab', count: 100, bytes: totalBytes / 2 }], largestAssets: Array.from({ length: 201 }, (_, i) => ({ ...assets[5], name: i === 0 ? malicious : `large-${i}` })), largestThresholdBytes: 50 * 1024, partial: true, scope: 'source-files' });
+const sizeStats = totalBytes => ({ totalBytes, totalFiles: 201, unknownFiles: 2, byType: [{ type: 'image', count: 100, bytes: totalBytes / 2 }, { type: 'prefab', count: 101, bytes: totalBytes / 2 }], largestAssets: Array.from({ length: 201 }, (_, i) => ({ ...assets[5], name: i === 0 ? malicious : `large-${i}`, type: i < 100 ? 'image' : 'cc.Prefab' })), largestThresholdBytes: 50 * 1024, partial: true, scope: 'source-files' });
 const messageRequest = async (name, message, args) => {
   assert.equal(name, 'cocos-resource-inspector'); calls.push({ message, args });
   if (message === 'get-state') return state;
@@ -53,6 +53,8 @@ const messageRequest = async (name, message, args) => {
   }
   if (message === 'get-size-stats') {
     if (state.revision === 2) return new Promise(resolve => { oldSizesResolve = resolve; });
+    if (state.revision === 4) { const stats = sizeStats(4 * 1024 ** 3); stats.largestAssets = stats.largestAssets.filter(asset => asset.type === 'cc.Prefab'); return stats; }
+    if (state.revision === 5) return { ...sizeStats(5 * 1024 ** 3), largestAssets: [] };
     return sizeStats(state.revision * 1024 ** 3);
   }
   if (message === 'query-issues') {
@@ -146,7 +148,27 @@ test('panel bounds DOM, escapes data, rejects stale responses, locates nodes and
   assert.equal(sizeNext().disabled, true);
   assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'paging reuses the current size result');
   sizePrev().dispatch('click'); await flush(); assert(q('#size-body').textContent.includes('large-100'));
+  const sizeType = () => q('#size-type-filter');
+  const largeTable = () => q('#size-body').querySelectorAll('table').at(-1);
+  assert.equal(sizeType().value, '', 'all types are selected by default');
+  assert.equal(sizeType().querySelectorAll('option').length, 3, 'types come from the full result, not the current page');
+  sizeType().value = 'image'; sizeType().dispatch('change'); await flush();
+  assert(q('#size-body').textContent.includes('大于 50 KB 的源资源（共 100 项）'));
+  assert.equal(q('#size-body').querySelectorAll('button').filter(button => button.textContent === '定位').length, 100);
+  assert(!largeTable().textContent.includes('large-100')); assert(largeTable().textContent.includes(malicious));
+  assert.equal(sizePrev().disabled, true); assert.equal(sizeNext().disabled, true);
+  sizeType().value = 'cc.Prefab'; sizeType().dispatch('change'); await flush();
+  assert(q('#size-body').textContent.includes('大于 50 KB 的源资源（共 101 项）'));
+  assert(largeTable().textContent.includes('large-100')); assert(!largeTable().textContent.includes(malicious));
+  sizeNext().dispatch('click'); await flush();
+  assert(largeTable().textContent.includes('large-200')); assert.equal(sizeNext().disabled, true);
+  sizeType().value = ''; sizeType().dispatch('change'); await flush();
+  assert(q('#size-body').textContent.includes('大于 50 KB 的源资源（共 201 项）'));
+  assert(largeTable().textContent.includes(malicious)); assert.equal(sizePrev().disabled, true);
+  sizeType().value = 'image'; sizeType().dispatch('change'); await flush();
+  assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'type filtering reuses the full cached result');
   q('#tab-issues').dispatch('click'); q('#tab-sizes').dispatch('click'); await flush();
+  assert.equal(sizeType().value, 'image', 'type selection survives tab changes');
   assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'size stats cached for same revision');
   await firePoll(); assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'poll carries no size stats request');
   state.revision = 2; await firePoll(); assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 2);
@@ -154,6 +176,14 @@ test('panel bounds DOM, escapes data, rejects stale responses, locates nodes and
   assert(q('#size-body').textContent.includes(malicious), 'new scan resets large resources to first page');
   oldSizesResolve(sizeStats(2 * 1024 ** 3)); await flush();
   assert(q('#size-body').textContent.includes('3 GiB')); assert(!q('#size-body').textContent.includes('2 GiB'), 'stale size response rejected');
+  assert.equal(sizeType().value, 'image', 'existing type selection survives a rescan');
+  state.revision = 4; await firePoll();
+  assert.equal(sizeType().value, '', 'missing types reset to all after a rescan');
+  assert(q('#size-body').textContent.includes('大于 50 KB 的源资源（共 101 项）'));
+  state.revision = 5; await firePoll();
+  assert.equal(sizeType().disabled, true, 'empty large-resource lists disable the type selector');
+  assert.equal(sizeType().querySelectorAll('option').length, 1);
+  assert(q('#size-body').textContent.includes('没有大于 50 KB 的源资源'));
   q('#export-html').dispatch('click'); await flush(); assert(q('#status').textContent.includes('D:/out/report.html'));
   panel.close.call(instance); await flush(); assert.equal(timers.size, 0); assert.equal(q('#assets').childNodes.length, 0); assert.equal(q('#size-body').childNodes.length, 0);
   assert.equal(q('#unused-table').childNodes.length, 0);

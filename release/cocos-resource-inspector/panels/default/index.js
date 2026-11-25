@@ -20,7 +20,7 @@ module.exports = Editor.Panel.define({
     let assetPage = 1, issuePage = 1, referencePage = 1;
     let unusedPage = 1;
     let revision = '', impact = null, impactDirectPage = 1, impactTransitivePage = 1;
-    let sizeStats = null, sizeStatsRevision = '', sizeLargestPage = 1;
+    let sizeStats = null, sizeStatsRevision = '', sizeLargestPage = 1, sizeTypeFilter = '';
     const epochs = { assets: 0, issues: 0, references: 0, impact: 0, sizes: 0, unused: 0 };
     const searchTimers = new Map();
     const listeners = [];
@@ -308,9 +308,24 @@ module.exports = Editor.Panel.define({
         const region = el('div', 'table-region size-types'); region.append(table); fragment.append(region);
         if (types.length > 200) fragment.append(el('p', 'helper', '类型表显示前 200 项，完整统计请查看导出报告。'));
       } else fragment.append(el('div', 'empty', '没有可统计的源文件'));
-      const largest = Array.isArray(sizeStats.largestAssets) ? sizeStats.largestAssets : [];
+      const largeAssets = Array.isArray(sizeStats.largestAssets) ? sizeStats.largestAssets : [];
+      const typeOf = asset => String(asset.type || 'unknown');
+      const typeCounts = new Map();
+      for (const asset of largeAssets) typeCounts.set(typeOf(asset), (typeCounts.get(typeOf(asset)) || 0) + 1);
+      if (sizeTypeFilter && !typeCounts.has(sizeTypeFilter)) { sizeTypeFilter = ''; sizeLargestPage = 1; }
+      const largest = sizeTypeFilter ? largeAssets.filter(asset => typeOf(asset) === sizeTypeFilter) : largeAssets;
       fragment.append(el('h3', '', `大于 50 KB 的源资源（共 ${count(largest.length)} 项）`));
       fragment.append(el('p', 'helper', '按 50 × 1024 字节筛选，严格大于 51,200 字节；按大小从大到小排列。'));
+      const filters = el('div', 'toolbar filters'), typeLabel = el('label', '', '资源类型'), typeSelect = el('select');
+      typeLabel.setAttribute('for', 'size-type-filter'); typeSelect.id = 'size-type-filter';
+      const labels = { image: '图片', 'cc.ImageAsset': '图片', 'audio-clip': '音频', 'cc.AudioClip': '音频', prefab: 'Prefab', 'cc.Prefab': 'Prefab', scene: '场景', script: '脚本', material: '材质', 'animation-clip': '动画剪辑', 'cc.AnimationClip': '动画剪辑', 'spine-data': 'Spine 动画', 'sp.SkeletonData': 'Spine 动画', 'spine-atlas': 'Spine 图集', dragonbones: 'DragonBones 动画', 'dragonbones-atlas': 'DragonBones 图集', 'sprite-atlas': '精灵图集', 'auto-atlas': '自动图集', buffer: '二进制', json: 'JSON', text: '文本', unknown: '未知类型' };
+      for (const [type, total] of [['', largeAssets.length], ...[...typeCounts].sort(([a], [b]) => a.localeCompare(b))]) {
+        const label = type ? Object.prototype.hasOwnProperty.call(labels, type) ? `${labels[type]} · ${type}` : type : '全部类型';
+        const option = el('option', '', `${label}（${count(total)} 项）`); option.value = type; typeSelect.append(option);
+      }
+      typeSelect.value = sizeTypeFilter; typeSelect.disabled = !largeAssets.length;
+      typeSelect.addEventListener('change', () => { sizeTypeFilter = typeSelect.value; sizeLargestPage = 1; renderSizes(); });
+      filters.append(typeLabel, typeSelect); fragment.append(filters);
       if (largest.length) {
         const pages = Math.ceil(largest.length / ROW_PAGE_SIZE);
         sizeLargestPage = Math.max(1, Math.min(sizeLargestPage, pages));
@@ -477,6 +492,7 @@ module.exports = Editor.Panel.define({
       for (const remove of listeners) remove();
       state = selectedAsset = impact = sizeStats = null;
       sizeStatsRevision = '';
+      sizeTypeFilter = '';
       q('#assets').replaceChildren(); q('#issue-table').replaceChildren(); q('#reference-table').replaceChildren(); q('#impact-body').replaceChildren(); q('#size-body').replaceChildren();
       q('#unused-table').replaceChildren();
     };
