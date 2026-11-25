@@ -54,7 +54,7 @@ test('source accounting includes malformed/missing meta and zero-byte files and 
     assert.equal(result.sizeStats.partial, false, 'bad metadata does not make the physical size accounting incomplete');
     assert.equal(result.sizeStats.byType.reduce((sum, item) => sum + item.bytes, 0), 21);
     assert.deepEqual(result.sizeStats.byType, [{ type: 'image', count: 3, bytes: 21 }, { type: 'bin', count: 1, bytes: 0 }]);
-    assert.equal(result.sizeStats.largestAssets.find(asset => asset.url.endsWith('/empty.bin')).size, 0);
+    assert.equal(result.sizeStats.largestAssets.length, 0, 'small and zero-byte sources remain in totals but not the large-resource list');
     assert.equal(result.summary.totalSourceBytes, 21);
     assert.equal(result.summary.sourceFiles, 4);
     assert.equal(result.summary.unknownSizeFiles, 0);
@@ -65,15 +65,15 @@ test('source accounting includes malformed/missing meta and zero-byte files and 
 
 test('duplicate UUID source files retain their own path, category, and bytes in size accounting', async t => {
     const f = fixture(t);
-    f.asset('first.png', 3, FIRST, 'image');
-    f.asset('second.mp3', 11, FIRST, 'audio-clip');
+    f.asset('first.png', 51203, FIRST, 'image');
+    f.asset('second.mp3', 51211, FIRST, 'audio-clip');
     const result = await scanProject({ projectPath: f.projectPath, assetInfos: [] });
     assert.ok(result.issues.some(issue => issue.code === 'DUPLICATE_UUID'));
     assert.equal(result.sizeStats.totalFiles, 2);
-    assert.equal(result.sizeStats.totalBytes, 14);
-    assert.deepEqual(result.sizeStats.byType, [{ type: 'audio-clip', count: 1, bytes: 11 }, { type: 'image', count: 1, bytes: 3 }]);
+    assert.equal(result.sizeStats.totalBytes, 102414);
+    assert.deepEqual(result.sizeStats.byType, [{ type: 'audio-clip', count: 1, bytes: 51211 }, { type: 'image', count: 1, bytes: 51203 }]);
     assert.deepEqual(result.sizeStats.largestAssets.map(asset => [asset.uuid, asset.url, asset.size]), [
-        [FIRST, 'db://assets/second.mp3', 11], [FIRST, 'db://assets/first.png', 3],
+        [FIRST, 'db://assets/second.mp3', 51211], [FIRST, 'db://assets/first.png', 51203],
     ]);
 });
 
@@ -116,19 +116,22 @@ test('stat errors remain unknown with a warning and never appear as real zero-by
     assert.ok(!result.sizeStats.largestAssets.some(asset => asset.uuid === FIRST));
 });
 
-test('largest assets are capped at fifty, descending by size with deterministic URL ties', () => {
-    const entries = Array.from({ length: 70 }, (_, index) => ({ uuid: `id-${index}`, url: `db://assets/${String(index).padStart(3, '0')}.bin`, size: index % 7, sizeKnown: true, type: 'bin' }));
-    const expected = entries.slice().sort((a, b) => b.size - a.size || a.url.localeCompare(b.url)).slice(0, 50);
+test('all sources strictly above 50 KB are retained, descending by size with deterministic URL ties', () => {
+    const entries = Array.from({ length: 90 }, (_, index) => ({ uuid: `id-${index}`, url: `db://assets/${String(index).padStart(3, '0')}.bin`, size: 51200 + index % 9 - 1, sizeKnown: true, type: 'bin' }));
+    const expected = entries.filter(asset => asset.size > 51200).sort((a, b) => b.size - a.size || a.url.localeCompare(b.url));
     const stats = buildSizeStats(entries);
-    assert.equal(stats.largestLimit, 50);
+    assert.equal(stats.largestThresholdBytes, 51200);
+    assert.equal(stats.largestAssets.length, 70, 'there is no fifty-item cap');
+    assert.ok(stats.largestAssets.every(asset => asset.size > 51200), 'exactly 50 KB is excluded');
+    assert.ok(stats.largestAssets.some(asset => asset.size === 51201), 'one byte over the threshold is included');
     assert.deepEqual(stats.largestAssets.map(asset => asset.url), expected.map(asset => asset.url));
-    assert.equal(stats.totalFiles, 70);
+    assert.equal(stats.totalFiles, 90);
     assert.equal(stats.totalBytes, entries.reduce((sum, entry) => sum + entry.size, 0));
 });
 
 test('size builder deduplicates physical paths and ignores folders, meta, virtual assets, and invalid sizes', () => {
     const stats = buildSizeStats([
-        { source: '/assets/image.png', url: 'db://assets/image.png', size: 7, sizeKnown: true, type: 'image' },
+        { source: '/assets/image.png', url: 'db://assets/image.png', size: 51207, sizeKnown: true, type: 'image' },
         { source: '/assets/image.png', url: 'db://assets/image.png', size: 100, sizeKnown: true, type: 'image', uuid: 'duplicate-row' },
         { source: '/assets/image.png', url: 'db://assets/image.png/frame', size: 1000, sizeKnown: true, subAsset: true, type: 'sprite-frame' },
         { url: 'db://assets/folder', size: 1000, sizeKnown: true, type: 'folder' },
@@ -138,7 +141,7 @@ test('size builder deduplicates physical paths and ignores folders, meta, virtua
         { url: 'db://assets/invalid.bin', size: -2, sizeKnown: true },
     ]);
     assert.equal(stats.totalFiles, 3);
-    assert.equal(stats.totalBytes, 7);
+    assert.equal(stats.totalBytes, 51207);
     assert.equal(stats.unknownFiles, 2);
     assert.equal(stats.partial, true);
     assert.equal(stats.largestAssets.length, 1);

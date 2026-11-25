@@ -1,8 +1,8 @@
 {
   "name": "cocos-resource-inspector",
   "package_version": 2,
-  "version": "1.1.1",
-  "description": "资源与 Prefab 体检：引用定位、丢失引用检查、删除影响预览、资源大小统计",
+  "version": "1.2.1",
+  "description": "资源与 Prefab 体检：未使用图片、音频和动画检测、引用定位、丢失引用检查、删除影响预览、资源大小统计",
   "author": "Cocos Resource Inspector",
   "license": "MIT",
   "editor": ">=3.8.0 <3.9.0",
@@ -33,6 +33,7 @@
       "scan-project": { "methods": ["scanProject"] },
       "cancel-scan": { "methods": ["cancelScan"] },
       "query-assets": { "methods": ["queryAssets"] },
+      "query-unused-assets": { "methods": ["queryUnusedAssets"] },
       "query-issues": { "methods": ["queryIssues"] },
       "query-references": { "methods": ["queryReferences"] },
       "get-impact": { "methods": ["getImpact"] },

@@ -105,6 +105,7 @@ exports.methods = {
     },
     cancelScan,
     queryAssets(options) { return store ? store.queryAssets(options) : page([], options); },
+    queryUnusedAssets(options) { return store ? store.queryUnusedAssets(options) : page([], options); },
     queryIssues(options) { return store ? store.queryIssues(options) : page([], options); },
     queryReferences(options) { return store ? store.queryReferences(options) : page([], options); },
     getSizeStats() { return requireStore().result.sizeStats; },

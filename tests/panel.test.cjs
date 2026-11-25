@@ -42,7 +42,7 @@ const state = { status: 'ready', revision: 1, dirty: false, outputDirectory: 'D:
 const malicious = '<img src=x onerror=alert(1)>';
 const issues = Array.from({ length: 101 }, (_, i) => ({ id: `issue-${i}`, severity: 'warning', code: 'MISSING', message: i ? `issue ${i}` : malicious, sourceUuid: 'uuid-0', sourceUrl: assets[0].url, nodePath: 'Root/Child', component: 'cc.Sprite', property: 'spriteFrame', nodeId: 'node-id', nodeLocator: { version: 1, segments: [{ name: 'Root', fileId: 'root-file-id' }] }, prefabTarget: { localID: ['component-file-id'] } }));
 const calls = []; let oldResolve, oldRequested = false, oldAssetsResolve, oldSizesResolve;
-const sizeStats = totalBytes => ({ totalBytes, totalFiles: 200, unknownFiles: 2, byType: [{ type: 'image', count: 100, bytes: totalBytes / 2 }, { type: 'prefab', count: 100, bytes: totalBytes / 2 }], largestAssets: Array.from({ length: 51 }, (_, i) => ({ ...assets[5], name: i === 0 ? malicious : `large-${i}` })), largestLimit: 50, partial: true, scope: 'source-files' });
+const sizeStats = totalBytes => ({ totalBytes, totalFiles: 200, unknownFiles: 2, byType: [{ type: 'image', count: 100, bytes: totalBytes / 2 }, { type: 'prefab', count: 100, bytes: totalBytes / 2 }], largestAssets: Array.from({ length: 201 }, (_, i) => ({ ...assets[5], name: i === 0 ? malicious : `large-${i}` })), largestThresholdBytes: 50 * 1024, partial: true, scope: 'source-files' });
 const messageRequest = async (name, message, args) => {
   assert.equal(name, 'cocos-resource-inspector'); calls.push({ message, args });
   if (message === 'get-state') return state;
@@ -59,6 +59,11 @@ const messageRequest = async (name, message, args) => {
     if (args.query === 'old') { oldRequested = true; return new Promise(resolve => { oldResolve = resolve; }); }
     if (args.query === 'new') return { items: [{ ...issues[0], message: 'new result' }], total: 1, page: 1, pageSize: 100 };
     return { items: issues, total: 101, page: 1, pageSize: 100 };
+  }
+  if (message === 'query-unused-assets') {
+    if (args.query === 'old') return new Promise(resolve => { oldResolve = resolve; });
+    if (args.query === 'new') return { items: [{ ...assets[0], name: 'fresh audio', category: 'audio', status: 'referenced', reason: 'name mention', incomingCount: 1 }], total: 1, page: 1, pageSize: 100, stats: { unused: 1, dynamic: 2, unknown: 3, unusedBytes: 1024 } };
+    return { items: assets.map(asset => ({ ...asset, name: malicious, category: 'audio', status: 'unused', reason: 'no references', incomingCount: 0 })), total: 201, page: 1, pageSize: 100, stats: { unused: 201, dynamic: 2, unknown: 3, unusedBytes: 1024 } };
   }
   if (message === 'query-references') return { items: [{ ...issues[0], targetUuid: 'uuid-1', targetUrl: assets[1].url, kind: 'serialized' }], total: 1, page: 1, pageSize: 100 };
   if (message === 'get-impact') return { direct: assets.slice(0, 150), transitive: assets.slice(0, 125), directTotal: 600, transitiveTotal: 800, truncated: true, caveat: 'STATIC ONLY' };
@@ -96,6 +101,22 @@ test('panel bounds DOM, escapes data, rejects stale responses, locates nodes and
   q('#issue-search').value = 'new'; q('#issue-search').dispatch('input'); fireDebounce(); await flush();
   oldResolve({ items: [{ ...issues[0], message: 'stale old result' }], total: 1, page: 1, pageSize: 100 }); await flush();
   assert(q('#issue-table').textContent.includes('new result')); assert(!q('#issue-table').textContent.includes('stale old result'));
+  q('#tab-unused').dispatch('click'); await flush();
+  assert.equal(q('#unused-table').querySelectorAll('tr').length, 101, 'usage DOM capped at 100 rows');
+  assert(q('#unused-table').textContent.includes(malicious)); assert.equal(q('#unused-table').querySelectorAll('img').length, 0);
+  assert(q('#unused-summary').textContent.includes('1 KiB')); assert.equal(q('#unused-next').disabled, false);
+  q('#unused-category').value = 'audio'; q('#unused-category').dispatch('change'); await flush();
+  assert.equal(calls.filter(call => call.message === 'query-unused-assets').at(-1).args.category, 'audio');
+  q('#unused-status').value = 'referenced'; q('#unused-status').dispatch('change'); await flush();
+  assert.equal(calls.filter(call => call.message === 'query-unused-assets').at(-1).args.status, 'referenced');
+  q('#unused-next').dispatch('click'); await flush();
+  assert.equal(calls.filter(call => call.message === 'query-unused-assets').at(-1).args.page, 2);
+  q('#unused-search').value = 'old'; q('#unused-search').dispatch('input'); fireDebounce(); await flush();
+  q('#unused-search').value = 'new'; q('#unused-search').dispatch('input'); fireDebounce(); await flush();
+  oldResolve({ items: [{ ...assets[0], name: 'stale audio' }], total: 1, page: 1, pageSize: 100 }); await flush();
+  assert(q('#unused-table').textContent.includes('fresh audio')); assert(!q('#unused-table').textContent.includes('stale audio'));
+  q('#unused-table').querySelectorAll('button').find(button => button.textContent === '查看引用').dispatch('click'); await flush();
+  assert.equal(q('#tab-references').attributes['aria-selected'], 'true');
   q('#assets').querySelectorAll('.asset-item')[0].dispatch('click'); q('#tab-references').dispatch('click'); await flush();
   assert(q('#reference-table').textContent.includes('spriteFrame'));
   const nodeButton = q('#reference-table').querySelectorAll('button').find(button => button.textContent === '定位节点'); nodeButton.dispatch('click'); await flush();
@@ -110,17 +131,31 @@ test('panel bounds DOM, escapes data, rejects stale responses, locates nodes and
   assert(q('#size-body').textContent.includes('1 GiB')); assert(q('#size-body').textContent.includes('50.00%'));
   assert(q('#size-body').textContent.includes('不完整')); assert(q('#size-body').textContent.includes(malicious));
   assert.equal(q('#size-body').querySelectorAll('img').length, 0, 'size names stay text');
-  assert.equal(q('#size-body').querySelectorAll('button').length, 50, 'largest DOM cap');
+  assert(q('#size-body').textContent.includes('大于 50 KB 的源资源（共 201 项）'));
+  assert.equal(q('#size-body').querySelectorAll('button').filter(button => button.textContent === '定位').length, 100, 'large resources paginate without truncating results');
   q('#size-body').querySelectorAll('button')[0].dispatch('click'); await flush();
   assert(calls.some(call => call.message === 'locate-asset' && call.args.uuid === 'uuid-5'));
+  const sizeNext = () => q('#size-body').querySelectorAll('button').find(button => button.textContent === '下一页');
+  const sizePrev = () => q('#size-body').querySelectorAll('button').find(button => button.textContent === '上一页');
+  assert.equal(sizePrev().disabled, true);
+  sizeNext().dispatch('click'); await flush();
+  assert(q('#size-body').textContent.includes('large-100')); assert(q('#size-body').textContent.includes('large-199'));
+  sizeNext().dispatch('click'); await flush();
+  assert(q('#size-body').textContent.includes('large-200'));
+  assert.equal(q('#size-body').querySelectorAll('button').filter(button => button.textContent === '定位').length, 1);
+  assert.equal(sizeNext().disabled, true);
+  assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'paging reuses the current size result');
+  sizePrev().dispatch('click'); await flush(); assert(q('#size-body').textContent.includes('large-100'));
   q('#tab-issues').dispatch('click'); q('#tab-sizes').dispatch('click'); await flush();
   assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'size stats cached for same revision');
   await firePoll(); assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 1, 'poll carries no size stats request');
   state.revision = 2; await firePoll(); assert.equal(calls.filter(call => call.message === 'get-size-stats').length, 2);
   state.revision = 3; await firePoll(); assert(q('#size-body').textContent.includes('3 GiB'));
+  assert(q('#size-body').textContent.includes(malicious), 'new scan resets large resources to first page');
   oldSizesResolve(sizeStats(2 * 1024 ** 3)); await flush();
   assert(q('#size-body').textContent.includes('3 GiB')); assert(!q('#size-body').textContent.includes('2 GiB'), 'stale size response rejected');
   q('#export-html').dispatch('click'); await flush(); assert(q('#status').textContent.includes('D:/out/report.html'));
   panel.close.call(instance); await flush(); assert.equal(timers.size, 0); assert.equal(q('#assets').childNodes.length, 0); assert.equal(q('#size-body').childNodes.length, 0);
+  assert.equal(q('#unused-table').childNodes.length, 0);
   const callsAfterClose = calls.length; q('#scan').dispatch('click'); await flush(); assert.equal(calls.length, callsAfterClose);
 });

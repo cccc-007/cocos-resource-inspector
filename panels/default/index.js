@@ -18,9 +18,10 @@ module.exports = Editor.Panel.define({
     let closed = false, state, activeTab = 'issues', selectedAsset = null;
     let pollTimer, statePending = false, stateAgain = false, busy = false, stateEpoch = 0;
     let assetPage = 1, issuePage = 1, referencePage = 1;
+    let unusedPage = 1;
     let revision = '', impact = null, impactDirectPage = 1, impactTransitivePage = 1;
-    let sizeStats = null, sizeStatsRevision = '';
-    const epochs = { assets: 0, issues: 0, references: 0, impact: 0, sizes: 0 };
+    let sizeStats = null, sizeStatsRevision = '', sizeLargestPage = 1;
+    const epochs = { assets: 0, issues: 0, references: 0, impact: 0, sizes: 0, unused: 0 };
     const searchTimers = new Map();
     const listeners = [];
     const on = (element, type, listener) => {
@@ -182,6 +183,32 @@ module.exports = Editor.Panel.define({
         q('#issue-table').replaceChildren(table);
       } catch (err) { if (!closed && epoch === epochs.issues && activeTab === 'issues') reportError(err); }
     }
+    async function loadUnused() {
+      const epoch = ++epochs.unused;
+      if (closed || activeTab !== 'unused') return;
+      if (!hasResult()) { empty(q('#unused-table'), '扫描后显示未使用检测结果'); resetPager('unused'); return; }
+      try {
+        const response = await request('query-unused-assets', { query: q('#unused-search').value.trim(), status: q('#unused-status').value || 'unused', category: q('#unused-category').value || 'all', page: unusedPage, pageSize: ROW_PAGE_SIZE });
+        if (closed || epoch !== epochs.unused || activeTab !== 'unused') return;
+        unusedPage = pageInfo('unused', response);
+        q('#unused-total').textContent = `${count(response.total)} 项`;
+        const stats = response.stats || {};
+        q('#unused-summary').textContent = `疑似未使用 ${count(stats.unused)} 项 · 已知源文件大小 ${bytes(stats.unusedBytes)} · 动态加载待确认 ${count(stats.dynamic)} 项 · 扫描不完整待确认 ${count(stats.unknown)} 项${stats.unknownSizeFiles ? ` · ${count(stats.unknownSizeFiles)} 项大小未知` : ''}`;
+        const items = Array.isArray(response.items) ? response.items.slice(0, ROW_PAGE_SIZE) : [];
+        if (!items.length) { empty(q('#unused-table'), stats.partial ? '当前筛选无结果；扫描不完整，请切换“扫描不完整待确认”检查。' : '当前筛选下没有匹配的资源。'); return; }
+        const labels = { unused: '疑似未使用', dynamic: '动态加载待确认', unknown: '扫描不完整待确认', referenced: '已发现引用' };
+        const categories = { image: '图片', audio: '音频', spine: 'Spine JSON', 'spine-binary': 'Spine 二进制', dragonbones: 'DragonBones JSON', 'dragonbones-binary': 'DragonBones 二进制', animation: '动画剪辑', atlas: '图集', binary: '其他二进制' };
+        const { table, body } = makeTable(['资源 / 类型', '大小', '使用状态 / 判断依据', '操作']);
+        for (const asset of items) {
+          const row = el('tr'), resource = el('td'), status = el('td'), actions = el('td');
+          resource.append(el('span', 'cell-title', nameOf(asset)), el('small', '', asset.url), el('small', '', categories[asset.category] || asset.type));
+          status.append(el('span', `tag ${asset.status === 'referenced' ? 'info' : 'warning'}`, labels[asset.status] || asset.status), el('small', '', asset.reason), el('small', '', `其他源文件的直接引用：${count(asset.incomingCount)}`));
+          actions.append(actionButton('定位资源', () => locateAsset(asset)), actionButton('查看引用', () => { selectAsset(asset); switchTab('references'); }));
+          row.append(resource, el('td', 'size-number', assetSize(asset)), status, actions); body.append(row);
+        }
+        q('#unused-table').replaceChildren(table);
+      } catch (err) { if (!closed && epoch === epochs.unused && activeTab === 'unused') reportError(err); }
+    }
     async function loadReferences() {
       const epoch = ++epochs.references;
       if (closed || activeTab !== 'references') return;
@@ -281,19 +308,29 @@ module.exports = Editor.Panel.define({
         const region = el('div', 'table-region size-types'); region.append(table); fragment.append(region);
         if (types.length > 200) fragment.append(el('p', 'helper', '类型表显示前 200 项，完整统计请查看导出报告。'));
       } else fragment.append(el('div', 'empty', '没有可统计的源文件'));
-      const largest = Array.isArray(sizeStats.largestAssets) ? sizeStats.largestAssets.slice(0, 50) : [];
-      fragment.append(el('h3', '', '最大的 50 个源资源'));
+      const largest = Array.isArray(sizeStats.largestAssets) ? sizeStats.largestAssets : [];
+      fragment.append(el('h3', '', `大于 50 KB 的源资源（共 ${count(largest.length)} 项）`));
+      fragment.append(el('p', 'helper', '按 50 × 1024 字节筛选，严格大于 51,200 字节；按大小从大到小排列。'));
       if (largest.length) {
+        const pages = Math.ceil(largest.length / ROW_PAGE_SIZE);
+        sizeLargestPage = Math.max(1, Math.min(sizeLargestPage, pages));
+        const offset = (sizeLargestPage - 1) * ROW_PAGE_SIZE;
         const { table, body } = makeTable(['排名', '名称 / 路径', '类型', '大小', '操作']);
-        largest.forEach((asset, index) => {
+        largest.slice(offset, offset + ROW_PAGE_SIZE).forEach((asset, index) => {
           const row = el('tr'), resource = el('td'), action = el('td');
           resource.append(el('span', 'cell-title', nameOf(asset)), el('small', '', asset.url || asset.uuid || '—'));
           action.append(actionButton('定位', () => locateAsset(asset)));
-          row.append(el('td', 'size-number', index + 1), resource, el('td', '', asset.type || '未知类型'), el('td', 'size-number', bytes(asset.size)), action);
+          row.append(el('td', 'size-number', offset + index + 1), resource, el('td', '', asset.type || '未知类型'), el('td', 'size-number', bytes(asset.size)), action);
           body.append(row);
         });
         const region = el('div', 'table-region'); region.append(table); fragment.append(region);
-      } else fragment.append(el('div', 'empty', '没有大小可用的源资源'));
+        const pager = el('div', 'pagination');
+        const turn = delta => { sizeLargestPage += delta; renderSizes(); };
+        const previous = actionButton('上一页', () => turn(-1)), next = actionButton('下一页', () => turn(1));
+        previous.setAttribute('aria-label', '上一页大资源'); next.setAttribute('aria-label', '下一页大资源');
+        previous.disabled = sizeLargestPage <= 1; next.disabled = sizeLargestPage >= pages;
+        pager.append(previous, el('span', '', `${sizeLargestPage} / ${pages}`), next); fragment.append(pager);
+      } else fragment.append(el('div', 'empty', '没有大于 50 KB 的源资源'));
       container.replaceChildren(fragment);
     }
     async function loadSizes() {
@@ -311,7 +348,7 @@ module.exports = Editor.Panel.define({
         if (!closed && epoch === epochs.sizes && activeTab === 'sizes') { empty(q('#size-body'), '读取资源大小失败，请重新打开此页签或重新扫描。'); reportError(err); }
       }
     }
-    const loadActive = () => activeTab === 'issues' ? loadIssues() : activeTab === 'references' ? loadReferences() : activeTab === 'sizes' ? loadSizes() : loadImpact();
+    const loadActive = () => activeTab === 'issues' ? loadIssues() : activeTab === 'unused' ? loadUnused() : activeTab === 'references' ? loadReferences() : activeTab === 'sizes' ? loadSizes() : loadImpact();
     const renderState = () => {
       const scanning = isScanning(), result = state && state.result;
       const labels = { idle: '尚未扫描', scanning: '扫描中', ready: '扫描完成', error: '扫描失败' };
@@ -361,7 +398,7 @@ module.exports = Editor.Panel.define({
         revision = nextRevision;
         for (const key of Object.keys(epochs)) ++epochs[key];
         impact = null;
-        sizeStats = null; sizeStatsRevision = '';
+        sizeStats = null; sizeStatsRevision = ''; sizeLargestPage = 1;
         void loadAssets(); void loadActive();
         if (hasResult() && !state.error) setStatus(state.dirty ? '扫描完成后资源又有变化，请重新扫描。' : '扫描完成。可查看问题或选择资源检查引用。');
       }
@@ -408,6 +445,10 @@ module.exports = Editor.Panel.define({
     on(q('#asset-sort'), 'change', () => { assetPage = 1; void loadAssets(); });
     on(q('#issue-search'), 'input', () => { ++epochs.issues; issuePage = 1; debounce('issues', loadIssues); });
     on(q('#severity'), 'change', () => { issuePage = 1; void loadIssues(); });
+    on(q('#unused-search'), 'input', () => { ++epochs.unused; unusedPage = 1; debounce('unused', loadUnused); });
+    for (const selector of ['#unused-status', '#unused-category']) on(q(selector), 'change', () => { unusedPage = 1; void loadUnused(); });
+    on(q('#unused-prev'), 'click', () => { unusedPage = Math.max(1, unusedPage - 1); void loadUnused(); });
+    on(q('#unused-next'), 'click', () => { ++unusedPage; void loadUnused(); });
     on(q('#reference-direction'), 'change', () => { referencePage = 1; void loadReferences(); });
     on(q('#asset-prev'), 'click', () => { assetPage = Math.max(1, assetPage - 1); void loadAssets(); });
     on(q('#asset-next'), 'click', () => { ++assetPage; void loadAssets(); });
@@ -415,18 +456,18 @@ module.exports = Editor.Panel.define({
     on(q('#issue-next'), 'click', () => { ++issuePage; void loadIssues(); });
     on(q('#reference-prev'), 'click', () => { referencePage = Math.max(1, referencePage - 1); void loadReferences(); });
     on(q('#reference-next'), 'click', () => { ++referencePage; void loadReferences(); });
-    for (const button of app.querySelectorAll('[data-tab]')) on(button, 'click', () => {
-      const tab = button.dataset.tab;
+    function switchTab(tab) {
       if (activeTab === tab) return;
       activeTab = tab;
-      ++epochs.issues; ++epochs.references; ++epochs.impact; ++epochs.sizes;
+      ++epochs.issues; ++epochs.references; ++epochs.impact; ++epochs.sizes; ++epochs.unused;
       for (const item of app.querySelectorAll('[data-tab]')) {
         const selected = item.dataset.tab === tab;
         item.classList.toggle('active', selected); item.setAttribute('aria-selected', String(selected));
       }
       for (const content of app.querySelectorAll('.tab-content')) content.hidden = content.id !== tab;
       renderSelection(); void loadActive();
-    });
+    }
+    for (const button of app.querySelectorAll('[data-tab]')) on(button, 'click', () => switchTab(button.dataset.tab));
     this.dispose = () => {
       closed = true;
       clearTimeout(pollTimer);
@@ -437,6 +478,7 @@ module.exports = Editor.Panel.define({
       state = selectedAsset = impact = sizeStats = null;
       sizeStatsRevision = '';
       q('#assets').replaceChildren(); q('#issue-table').replaceChildren(); q('#reference-table').replaceChildren(); q('#impact-body').replaceChildren(); q('#size-body').replaceChildren();
+      q('#unused-table').replaceChildren();
     };
     renderState();
     void refreshState().then(schedulePoll);

@@ -17,7 +17,7 @@ const IDS = {
     third: "33333333-3333-4333-8333-333333333333",
     texture: "f93c0560-a802-4204-8f66-5655fdef8a08",
     compressedTexture: "f9PAVgqAJCBI9mVlX974oI",
-    script: "a292a04a-c933-5665-874b-a0e2f1c9b9d2",
+    script: "d292a04a-c822-4e74-874b-5a25f4819fc8",
     scriptType: "d292aBKyCJOdIdLWiX0gZ/I",
     missing: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     missingScript: "fc991dd7-0033-4b80-9d41-c8a86a702e59",

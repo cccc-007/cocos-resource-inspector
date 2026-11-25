@@ -1,8 +1,8 @@
 {
   "name": "cocos-resource-inspector",
   "package_version": 2,
-  "version": "1.1.1",
-  "description": "资源与 Prefab 体检：引用定位、丢失引用检查、删除影响预览、资源大小统计",
+  "version": "1.2.1",
+  "description": "资源与 Prefab 体检：未使用图片、音频和动画检测、引用定位、丢失引用检查、删除影响预览、资源大小统计",
   "author": "Cocos Resource Inspector",
   "license": "MIT",
   "editor": ">=3.8.0 <3.9.0",
@@ -12,6 +12,7 @@
       "title": "资源 / Prefab 体检",
       "type": "dockable",
       "main": "./panels/default",
+      "icon": "./static/icon.png",
       "size": {
         "min-width": 860,
         "min-height": 560,
@@ -31,6 +32,7 @@
       {
         "path": "i18n:menu.extension",
         "label": "资源 / Prefab 体检",
+        "icon": "./static/icon.png",
         "message": "open-panel"
       }
     ],
@@ -58,6 +60,11 @@
       "query-assets": {
         "methods": [
           "queryAssets"
+        ]
+      },
+      "query-unused-assets": {
+        "methods": [
+          "queryUnusedAssets"
         ]
       },
       "query-issues": {

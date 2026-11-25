@@ -50,6 +50,9 @@ test('extension scans on worker, keeps IPC lightweight, invalidates changed data
         assert.deepEqual(calls[0], ['asset-db', 'query-assets']);
         assert.equal(extension.methods.queryReferences({ uuid: imageId, direction: 'incoming' }).total, 1);
         assert.equal(extension.methods.getImpact({ uuid: imageId }).direct[0].uuid, prefabId);
+        assert.equal(extension.methods.queryUnusedAssets({ status: 'referenced', category: 'image' }).items[0].uuid, imageId);
+        assert.equal(extension.methods.queryUnusedAssets({ status: 'unused' }).total, 0);
+        assert.equal(state.result.usage, undefined, 'routine polling must not include usage rows');
         const sizeStats = extension.methods.getSizeStats();
         const expectedSize = fs.statSync(path.join(root, 'assets', 'image.png')).size + fs.statSync(path.join(root, 'assets', 'example.prefab')).size;
         assert.equal(sizeStats.totalBytes, expectedSize);

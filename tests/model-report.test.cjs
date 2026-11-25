@@ -59,16 +59,17 @@ test('size sorting happens before pagination and puts unknown or shared subasset
 });
 test('reports retain size stats, readable units and unknown/partial scope without interpreting asset names as markup', () => {
     const result = fixture();
-    result.sizeStats = { totalBytes: 1536, totalFiles: 2, unknownFiles: 1, partial: true, largestLimit: 50, scope: 'source-files',
-        byType: [{ type: 'image', count: 1, bytes: 1536 }], largestAssets: [{ url: 'db://assets/<img>.png', type: 'image', size: 1536 }] };
+    result.sizeStats = { totalBytes: 65536, totalFiles: 2, unknownFiles: 1, partial: true, largestThresholdBytes: 51200, scope: 'source-files',
+        byType: [{ type: 'image', count: 1, bytes: 65536 }], largestAssets: [{ url: 'db://assets/<img>.png', type: 'image', size: 65536 }] };
     const html = htmlReport(result);
     assert.match(html, /资源大小/);
-    assert.match(html, /1\.50 KiB/);
+    assert.match(html, /64\.00 KiB/);
     assert.match(html, /扫描不完整/);
     assert.match(html, /1 个文件大小未知/);
     assert.match(html, /&lt;img&gt;\.png/);
     assert.ok(!html.includes('<img>'));
     assert.equal(formatBytes(0), '0 B');
+    assert.equal(formatBytes(1536), '1.50 KiB');
     assert.equal(formatBytes(1048576), '1.00 MiB');
     assert.equal(formatBytes(null), '不可用');
     const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'resource-size-report-'));
@@ -76,6 +77,17 @@ test('reports retain size stats, readable units and unknown/partial scope withou
         const output = writeReport(temporary, result, 'json');
         assert.deepEqual(JSON.parse(fs.readFileSync(output.path, 'utf8')).sizeStats, result.sizeStats);
     } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+});
+test('HTML includes every source above the size threshold even beyond generic report row limits', () => {
+    const result = fixture();
+    const largestAssets = Array.from({ length: 10001 }, (_, index) => ({ url: `db://assets/large-${index}.png`, type: 'image', size: 70000 - index }));
+    const totalBytes = largestAssets.reduce((sum, asset) => sum + asset.size, 0);
+    result.sizeStats = { totalBytes, totalFiles: largestAssets.length, unknownFiles: 0, partial: false, largestThresholdBytes: 51200,
+        byType: [{ type: 'image', count: largestAssets.length, bytes: totalBytes }], largestAssets };
+    const html = htmlReport(result);
+    assert.match(html, /大于 50 KB 的源资源/);
+    assert.match(html, /large-10000\.png/);
+    assert.equal((html.match(/db:\/\/assets\/large-\d+\.png/g) || []).length, 10001);
 });
 test('HTML export escapes project data and JSON retains full scan result', () => {
     const result = fixture();

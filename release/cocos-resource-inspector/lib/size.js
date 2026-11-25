@@ -2,7 +2,7 @@
 
 const path = require('path');
 
-const LARGEST_LIMIT = 50;
+const LARGE_THRESHOLD_BYTES = 50 * 1024;
 const EXTENSION_TYPES = Object.freeze({
     '.png': 'image', '.jpg': 'image', '.jpeg': 'image', '.webp': 'image', '.bmp': 'image', '.gif': 'image', '.tga': 'image', '.tif': 'image', '.tiff': 'image', '.psd': 'image', '.hdr': 'image', '.exr': 'image',
     '.mp3': 'audio-clip', '.wav': 'audio-clip', '.ogg': 'audio-clip', '.m4a': 'audio-clip', '.aac': 'audio-clip', '.flac': 'audio-clip',
@@ -25,7 +25,7 @@ function compareLargest(a, b) { return b.size - a.size || a.url.localeCompare(b.
 // The scanner provides a separate entry.asset record so duplicate UUID merging
 // in the reference index cannot change the URL/type of the second source file.
 function buildSizeStats(entries, options = {}) {
-    const stats = { totalBytes: 0, totalFiles: 0, unknownFiles: 0, byType: [], largestAssets: [], largestLimit: LARGEST_LIMIT, partial: options.partial === true, scope: 'source-files' };
+    const stats = { totalBytes: 0, totalFiles: 0, unknownFiles: 0, byType: [], largestAssets: [], largestThresholdBytes: LARGE_THRESHOLD_BYTES, partial: options.partial === true, scope: 'source-files' };
     const types = new Map();
     const seen = new Set();
     const largest = [];
@@ -49,17 +49,10 @@ function buildSizeStats(entries, options = {}) {
         if (!known || !Number.isSafeInteger(bytes) || bytes < 0) { stats.unknownFiles++; stats.partial = true; continue; }
         stats.totalBytes += bytes;
         group.bytes += bytes;
-        const candidate = { uuid: asset.uuid || '', url, name: asset.name || path.basename(source || url), type, size: bytes, ...(source ? { source } : {}) };
-        if (largest.length < LARGEST_LIMIT || compareLargest(candidate, largest[largest.length - 1]) < 0) {
-            let low = 0;
-            let high = largest.length;
-            while (low < high) { const middle = (low + high) >>> 1; if (compareLargest(candidate, largest[middle]) < 0) high = middle; else low = middle + 1; }
-            largest.splice(low, 0, candidate);
-            if (largest.length > LARGEST_LIMIT) largest.pop();
-        }
+        if (bytes > LARGE_THRESHOLD_BYTES) largest.push({ uuid: asset.uuid || '', url, name: asset.name || path.basename(source || url), type, size: bytes, ...(source ? { source } : {}) });
     }
     stats.byType = Array.from(types.values()).sort((a, b) => b.bytes - a.bytes || a.type.localeCompare(b.type));
-    stats.largestAssets = largest;
+    stats.largestAssets = largest.sort(compareLargest);
     return stats;
 }
 

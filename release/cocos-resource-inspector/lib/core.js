@@ -5,11 +5,15 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { buildSizeStats, sourceType } = require('./size');
+const { buildUsage } = require('./usage');
+const { createAnimationInspector } = require('./animation');
+const { createAudioInspector } = require('./audio');
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SERIALIZED_EXTENSIONS = new Set(['.prefab', '.scene', '.fire', '.mtl', '.material', '.anim', '.animation', '.pmtl', '.physicmaterial', '.render-texture', '.render-pipeline', '.spriteatlas', '.pac', '.terrain', '.json']);
 const SCRIPT_EXTENSIONS = new Set(['.ts', '.js', '.mjs', '.cjs']);
+const CONFIG_TEXT_EXTENSIONS = new Set(['.txt', '.csv', '.tsv', '.yaml', '.yml', '.xml', '.ini', '.toml', '.lua']);
 const DEFAULT_LIMITS = Object.freeze({ maxFileBytes: 16 * 1024 * 1024, maxFiles: 200000, maxAssets: 200000, maxReferences: 150000, maxIssues: 30000, maxObjectVisits: 1000000, maxDepth: 160 });
 const YIELD_EVERY = 4000;
 
@@ -232,7 +236,7 @@ async function scanProject(options) {
         } catch (error) { issue('error', 'INVALID_META', `meta 无法解析：${error.message}`, { sourceUrl: url }); metrics.skippedFiles++; limitation('部分 meta 无法解析，UUID 索引不完整。', true); continue; }
         const entry = pathEntries.get(source);
         await inspectSize(entry);
-        const physicalAsset = { uuid: normalizeUuid(data.uuid), url, name: path.basename(source), type: fileType(source, data.importer, !!entry && entry.directory), size: entry && entry.sizeKnown ? entry.size : 0, sizeKnown: !!entry && entry.sizeKnown === true, source, subAsset: false, internal: false, missingSource: !entry };
+        const physicalAsset = { uuid: normalizeUuid(data.uuid), url, name: path.basename(source), type: fileType(source, data.importer, !!entry && entry.directory), size: entry && entry.sizeKnown ? entry.size : 0, sizeKnown: !!entry && entry.sizeKnown === true, source, subAsset: false, internal: false, missingSource: !entry, isBundle: !!(data.userData && data.userData.isBundle) };
         if (entry) entry.asset = physicalAsset;
         const root = addAsset(physicalAsset, 'disk');
         if (!root) continue;
@@ -307,7 +311,7 @@ async function scanProject(options) {
                         stack.push({ value: sub, source: subAsset || source, property: `${propertyPath}.${subKey}`, depth: depth + 1 });
                     }
                 } else if (key === 'uuid' && (!property || /(?:^|\.)subMetas\.[^.]+$/.test(property))) { /* metadata identity */ }
-                else if (typeof child === 'string' && /uuid/i.test(key) && (isUuid(child) || child.startsWith('db://'))) {
+                else if (typeof child === 'string' && (child.startsWith('db://') || isUuid(child) && (/uuid/i.test(key) || /(?:^|\.)(?:textures?|atlas|dependencies)(?:\.|$)/i.test(propertyPath) || assetsByUuid.has(normalizeUuid(child))))) {
                     const target = child.startsWith('db://') ? assetsByUrl.get(child) : null;
                     if (target || !child.startsWith('db://')) addReference(source, target ? target.uuid : child, propertyPath, 'meta');
                     else issue('warning', 'UNRESOLVED_DATABASE_URI', `资源数据库路径无法解析：${child}`, relationLocation(source, { property: propertyPath }));
@@ -318,19 +322,52 @@ async function scanProject(options) {
         progress('metadata', index + 1, metadata.length, root.url);
     }
 
+    async function readText(source) {
+        if (source.sizeKnown !== true || source.size > limits.maxFileBytes) {
+            metrics.skippedFiles++;
+            limitation(`文本依赖未读取（大小未知或超过 ${limits.maxFileBytes} 字节）：${source.url}`, true);
+            return null;
+        }
+        try { return (await fs.readFile(source.source, 'utf8')).replace(/^\uFEFF/, ''); }
+        catch (error) { issue('warning', 'READ_ERROR', `无法读取依赖文本：${error.message}`, relationLocation(source)); limitation('部分依赖文本读取失败。', true); return null; }
+    }
+    const inspectAnimation = createAnimationInspector({ sourceByPath, assetsByUuid, dependencies: dependencySets, readText, addReference,
+        incomplete(source, message) { issue('warning', 'ANIMATION_DEPENDENCY_UNKNOWN', message, relationLocation(source)); limitation(`${source.url}：${message}`, true); } });
+    const inspectAudio = createAudioInspector(sourceByPath.values(), addReference);
     const files = entries.filter(entry => !entry.directory);
     for (let index = 0; index < files.length && !cancelled(); index++) {
         const entry = files[index];
         const source = sourceByPath.get(entry.file);
         if (!source) { metrics.skippedFiles++; continue; }
         metrics.scannedFiles++;
-        if (!SERIALIZED_EXTENSIONS.has(extension(entry.file))) continue;
-        if (entry.sizeKnown !== true) { metrics.skippedFiles++; continue; }
+        if (source.type === 'script') {
+            const text = await readText(source);
+            inspectAudio(source, text);
+            // Conservative string evidence, including loadAny UUIDs. Comments
+            // may retain an asset; runtime expressions are not evaluated.
+            const literals = /(['"`])([^'"`\r\n]+)\1/g;
+            let match;
+            while (text != null && (match = literals.exec(text))) {
+                if (cancelled()) break;
+                const value = match[2];
+                const target = assetsByUrl.get(value);
+                if (target || assetsByUuid.has(normalizeUuid(value))) addReference(source, target ? target.uuid : value, `string@${match.index}`, 'script-literal');
+            }
+            continue;
+        }
+        if (!SERIALIZED_EXTENSIONS.has(extension(entry.file))) {
+            await inspectAnimation(source);
+            if (CONFIG_TEXT_EXTENSIONS.has(extension(entry.file))) inspectAudio(source, await readText(source));
+            continue;
+        }
+        if (entry.sizeKnown !== true) { metrics.skippedFiles++; limitation(`JSON 大小未知，未扫描引用：${source.url}`, true); continue; }
         if (source.size > limits.maxFileBytes) { metrics.skippedFiles++; limitation(`跳过过大的 JSON（超过 ${limits.maxFileBytes} 字节）：${source.url}`, true); issue('warning', 'SCAN_LIMIT', '文件超过单文件扫描大小上限。', relationLocation(source)); continue; }
         let data;
         try { data = JSON.parse((await fs.readFile(entry.file, 'utf8')).replace(/^\uFEFF/, '')); }
         catch (error) { issue('error', 'INVALID_JSON', `JSON 无法解析：${error.message}`, relationLocation(source)); metrics.skippedFiles++; limitation('部分 JSON 无法解析，这些文件的引用未扫描。', true); continue; }
         metrics.serializedFiles++;
+        await inspectAnimation(source, data);
+        if (typeof data === 'string') inspectAudio(source, data, '$');
         const isScene = source.type === 'scene';
         const isPrefab = source.type === 'prefab';
         const table = Array.isArray(data) && data.some(value => value && typeof value === 'object' && typeof value.__type__ === 'string') ? data : null;
@@ -365,7 +402,16 @@ async function scanProject(options) {
                 const scriptUuid = scriptUuidFromType(value._componentId);
                 if (scriptUuid) addReference(source, scriptUuid, current.property ? `${current.property}._componentId` : '_componentId', 'script', location);
             }
-            for (const [key, child] of Object.entries(value)) if (child && typeof child === 'object') stack.push({ value: child, property: current.property ? Array.isArray(value) ? `${current.property}[${key}]` : `${current.property}.${key}` : key, objectIndex: current.objectIndex, depth: current.depth + 1 });
+            for (const [key, child] of Object.entries(value)) {
+                const childPath = current.property ? Array.isArray(value) ? `${current.property}[${key}]` : `${current.property}.${key}` : key;
+                if (!Array.isArray(value)) inspectAudio(source, key, `${childPath}(key)`, location);
+                if (child && typeof child === 'object') stack.push({ value: child, property: childPath, objectIndex: current.objectIndex, depth: current.depth + 1 });
+                else if (typeof child === 'string' && key !== '__uuid__' && key !== '__type__' && key !== '_componentId' && key !== '_id' && key !== 'uuid') {
+                    const target = assetsByUrl.get(child);
+                    if (target || assetsByUuid.has(normalizeUuid(child))) addReference(source, target ? target.uuid : child, childPath, 'string', location);
+                    inspectAudio(source, child, childPath, location);
+                }
+            }
             if (visits % YIELD_EVERY === 0) await breathe();
         }
         progress('references', index + 1, files.length, source.url);
@@ -374,7 +420,10 @@ async function scanProject(options) {
     limitation('仅分析已保存的源资源及 meta；未保存的场景、脚本运行时动态加载、字符串拼接和反射引用不在静态引用图中。');
     limitation('未被引用不等于可删除；resources、Bundle 入口、远程资源和业务配置可能在运行时加载。插件不删除项目资源。');
     limitation('脚本检查验证 UUID 对应文件是否存在，不替代 TypeScript 编译、组件类注册和运行时验证。');
+    limitation('音频额外按文件名、去扩展名名称和路径匹配脚本及配置文本；同名资源、注释或普通文本也保守视为引用线索。拼接名称、外部配置和运行时调用是否执行无法静态确认。');
     for (const asset of assetsByUuid.values()) {
+        const physical = sourceByPath.get(asset.source);
+        if (physical && physical.url === asset.url && physical.usageCategory) asset.usageCategory = physical.usageCategory;
         asset.dependencies = Array.from(dependencySets.get(asset.uuid) || []);
         delete asset._origin;
         result.assets.push(asset);
@@ -383,6 +432,9 @@ async function scanProject(options) {
     const projectAssets = result.assets.filter(asset => !asset.internal && !asset.subAsset && asset.type !== 'folder');
     result.sizeStats = buildSizeStats(entries, { partial: sizePartial || metrics.cancelled });
     result.summary = Object.assign({ assets: projectAssets.length, subAssets: result.assets.filter(asset => asset.subAsset && !asset.internal).length, internalAssets: result.assets.filter(asset => asset.internal).length, prefabs: projectAssets.filter(asset => asset.type === 'prefab').length, scenes: projectAssets.filter(asset => asset.type === 'scene').length, scripts: projectAssets.filter(asset => asset.type === 'script').length, references: referenceNumber, errors: issueCounts.error, warnings: issueCounts.warning, infos: issueCounts.info, retainedReferences: result.references.length, retainedIssues: result.issues.length, totalSourceBytes: result.sizeStats.totalBytes, sourceFiles: result.sizeStats.totalFiles, unknownSizeFiles: result.sizeStats.unknownFiles }, metrics);
+    result.usage = buildUsage(result);
+    result.summary.unusedAssets = result.usage.stats.unused;
+    result.summary.unusedSourceBytes = result.usage.stats.unusedBytes;
     result.limitations = Array.from(limitations);
     progress('complete', metrics.scannedFiles, files.length);
     return result;

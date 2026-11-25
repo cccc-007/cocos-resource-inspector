@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const { CAVEAT } = require('./model');
+const { USAGE_LABELS, CATEGORY_LABELS } = require('./usage');
 const escape = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 function outputDirectory(root) { return path.join(root, 'RIReports'); }
 function table(headers, rows) {
@@ -20,8 +21,16 @@ function sizeSection(stats) {
     return `<h2>资源大小</h2><p>源文件总大小：<strong>${escape(formatBytes(stats.totalBytes))}</strong> · ${escape(stats.totalFiles)} 个源文件 · ${escape(stats.unknownFiles)} 个文件大小未知。</p>
 <div class="notice">统计 assets/ 下源资源的磁盘字节，不含 .meta、目录、内置资源及构建产物。子资源不重复计入；构建包体、下载压缩大小和显存占用需要另行分析。${stats.partial ? ' 本次扫描不完整，大小统计可能有遗漏。' : ''}</div>
 ${table(['类型', '源文件数', '大小', '占比'], (stats.byType || []).map(item => [item.type, item.count, formatBytes(item.bytes), percentage(item.bytes)]))}
-<h2>大资源排行（前 ${escape(stats.largestLimit || 50)} 个）</h2>
-${table(['排名', '资源路径', '类型', '大小'], (stats.largestAssets || []).slice(0, 50).map((item, index) => [index + 1, item.url, item.type, formatBytes(item.size)]))}`;
+<h2>大于 50 KB 的源资源（&gt; 51,200 字节）</h2>
+${table(['排名', '资源路径', '类型', '大小'], (stats.largestAssets || []).map((item, index) => [index + 1, item.url, item.type, formatBytes(item.size)]))}`;
+}
+function usageSection(usage) {
+    if (!usage) return '';
+    const stats = usage.stats;
+    const pending = usage.items.filter(asset => asset.status !== 'referenced');
+    return `<h2>未使用资源检测</h2><p>疑似未使用：${escape(stats.unused)} 项 · 已知源文件大小：${escape(formatBytes(stats.unusedBytes))} · 动态加载待确认：${escape(stats.dynamic)} 项 · 扫描不完整待确认：${escape(stats.unknown)} 项 · ${escape(stats.unknownSizeFiles)} 项候选大小未知。</p>
+<div class="notice">按图片、音频和动画源文件统计，子资源不重复计入。所有场景、Prefab、脚本及其他类型资源均视为保守入口；从依赖链判断是否使用。音频还匹配脚本和配置中的文件名、去扩展名名称及路径；文本命中仅作为保守引用线索。resources / Bundle 及其依赖单独待确认。${stats.partial ? '扫描不完整，未找到引用的资源暂不列为疑似未使用。' : ''} 没有查到使用链不等于可安全删除。</div>
+${table(['资源路径', '类型', '源文件大小', '状态', '判断依据'], pending.slice(0, 10000).map(asset => [asset.url, CATEGORY_LABELS[asset.category] || asset.type, asset.sizeKnown === true ? formatBytes(asset.size) : '不可用', USAGE_LABELS[asset.status], asset.reason]))}`;
 }
 function htmlReport(result, dirty = false) {
     const issues = result.issues.slice(0, 10000);
@@ -30,10 +39,11 @@ function htmlReport(result, dirty = false) {
 <h1>资源 / Prefab 体检报告</h1><p>项目：${escape(result.projectPath)}<br>采集：${escape(result.scannedAt)}${dirty ? '<br>导出时资源已发生变化，请重新扫描获得最新结果。' : ''}</p><div class="notice">${escape(CAVEAT)}</div>
 <h2>统计</h2>${table(['项目', '数量'], Object.entries(result.summary).map(([key, value]) => [key, value]))}
 ${sizeSection(result.sizeStats)}
+${usageSection(result.usage)}
 <h2>覆盖范围与限制</h2><ul>${(result.limitations || []).map(value => `<li>${escape(typeof value === 'string' ? value : JSON.stringify(value))}</li>`).join('')}</ul>
 <h2>体检问题（${result.issues.length} 条）</h2>${table(['级别', '问题', '资源', '节点', '组件 / 属性', '目标 UUID'], issues.map(value => [value.severity, `${value.code}: ${value.message}`, value.sourceUrl, value.nodePath, [value.component, value.property].filter(Boolean).join(' / '), value.targetUuid]))}
 <h2>静态引用（${result.references.length} 条）</h2>${table(['来源', '节点', '组件 / 属性', '目标', '类型'], refs.map(value => [value.sourceUrl, value.nodePath, [value.component, value.property].filter(Boolean).join(' / '), value.targetUrl || value.targetUuid, value.kind]))}
-<p>HTML 每类最多展示 10,000 条。JSON 导出包含本次扫描保留的全部结果。</p></html>`;
+<p>体检问题、静态引用和未使用资源列表每类最多展示 10,000 条；大于 50 KB 的源资源列表完整展示。JSON 导出包含本次扫描保留的全部结果。</p></html>`;
 }
 function writeReport(root, result, format, dirty = false) {
     if (format !== 'json' && format !== 'html') throw new Error('仅支持 HTML 或 JSON 格式。');

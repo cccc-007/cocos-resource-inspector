@@ -22,8 +22,13 @@ async function run() {
     const assetsPath = path.join(temporary, 'assets');
     fs.mkdirSync(assetsPath);
     const image = '12345678-1234-4234-8234-123456789abc', prefab = 'abcdef12-1234-4234-8234-123456789abc', frame = image + '@f9941';
-    fs.writeFileSync(path.join(assetsPath, 'image.png'), 'fixture');
+    fs.writeFileSync(path.join(assetsPath, 'image.png'), Buffer.alloc(50 * 1024 + 1));
     fs.writeFileSync(path.join(assetsPath, 'image.png.meta'), JSON.stringify({ uuid: image, importer: 'image', subMetas: { f9941: { uuid: frame, importer: 'sprite-frame' } } }));
+    const audio = '12345678-1234-4234-8234-123456789abd', unusedAudio = '12345678-1234-4234-8234-123456789abe';
+    for (const [filename, uuid] of [['sound.mp3', audio], ['unused.mp3', unusedAudio], ['Audio.ts', '12345678-1234-4234-8234-123456789abf']]) {
+        fs.writeFileSync(path.join(assetsPath, filename), filename.endsWith('.ts') ? "playSound('sound');" : Buffer.from([0, 255, 1]));
+        fs.writeFileSync(path.join(assetsPath, filename + '.meta'), JSON.stringify({ uuid, importer: filename.endsWith('.ts') ? 'typescript' : 'audio-clip' }));
+    }
     fs.writeFileSync(path.join(assetsPath, 'Example.prefab.meta'), JSON.stringify({ uuid: prefab, importer: 'prefab' }));
     fs.writeFileSync(path.join(assetsPath, 'Example.prefab'), JSON.stringify([
         { __type__: 'cc.Prefab', data: { __id__: 1 } },
@@ -55,6 +60,10 @@ async function run() {
     assert.equal(state.result.summary.warnings, 0);
     assert.equal(extension.methods.queryReferences({ uuid: image, direction: 'incoming' }).total, 1);
     assert.equal(extension.methods.getImpact({ uuid: image }).direct[0].uuid, prefab);
+    assert.equal(extension.methods.queryUnusedAssets({ status: 'referenced', category: 'image' }).items[0].uuid, image);
+    assert.equal(extension.methods.queryUnusedAssets({ status: 'unused' }).items[0].uuid, unusedAudio);
+    assert.equal(extension.methods.queryUnusedAssets({ status: 'referenced', category: 'audio' }).items[0].uuid, audio);
+    assert.equal(extension.methods.queryReferences({ uuid: audio }).items[0].kind, 'audio-name');
     const reference = extension.methods.queryReferences({ uuid: image, direction: 'incoming' }).items[0];
     const liveNode = { uuid: 'editor-rebuilt-root', name: 'Root', children: [], _prefab: { fileId: 'root-file-id', asset: { _uuid: prefab } } };
     const liveScene = { uuid: 'wrapper-scene', name: 'EditorScene', children: [{ uuid: 'wrapper-canvas', name: 'Canvas', children: [liveNode] }] };
@@ -68,12 +77,14 @@ async function run() {
     liveNode.components = [{ __prefab: { fileId: 'sprite-file-id' }, node: liveNode }];
     assert.equal((await sceneExports.methods.findNode({ ...reference, prefabTarget: { localID: ['sprite-file-id'] } })).uuid, liveNode.uuid);
     const sizeStats = extension.methods.getSizeStats();
-    const expectedBytes = fs.statSync(path.join(assetsPath, 'image.png')).size + fs.statSync(path.join(assetsPath, 'Example.prefab')).size;
+    const expectedBytes = fs.readdirSync(assetsPath).filter(name => !name.endsWith('.meta')).reduce((total, name) => total + fs.statSync(path.join(assetsPath, name)).size, 0);
     assert.equal(sizeStats.totalBytes, expectedBytes);
-    assert.equal(sizeStats.totalFiles, 2);
+    assert.equal(sizeStats.totalFiles, 5);
     assert.equal(sizeStats.unknownFiles, 0);
-    assert.equal(sizeStats.largestAssets[0].uuid, prefab);
-    assert.equal(extension.methods.queryAssets({ sort: 'size-desc' }).items[0].uuid, prefab);
+    assert.equal(sizeStats.largestThresholdBytes, 50 * 1024);
+    assert.equal(sizeStats.largestAssets.length, 1);
+    assert.equal(sizeStats.largestAssets[0].uuid, image);
+    assert.equal(extension.methods.queryAssets({ sort: 'size-desc' }).items[0].uuid, image);
     listeners.get('asset-db:asset-change')();
     assert.equal(extension.methods.getState().dirty, true);
     for (const format of ['html', 'json']) {
@@ -87,7 +98,7 @@ async function run() {
     extension.unload(); extension = undefined;
     assert.equal(listeners.size, 0);
     console.log('EDITOR_RUNTIME_SMOKE_OK ' + JSON.stringify({ node: process.versions.node, electron: process.versions.electron, version: manifest.version,
-        checks: ['packaged-modules', 'panel-load', 'worker-scan', 'subasset-references', 'prefab-node-location', 'prefab-override-location', 'deletion-impact', 'source-size-stats', 'size-sorting', 'invalidation', 'html-json-export', 'unload'] }));
+        checks: ['packaged-modules', 'panel-load', 'worker-scan', 'subasset-references', 'unused-queries', 'audio-name-references', 'prefab-node-location', 'prefab-override-location', 'deletion-impact', 'source-size-stats', 'size-sorting', 'invalidation', 'html-json-export', 'unload'] }));
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
     if (extension) extension.unload();
