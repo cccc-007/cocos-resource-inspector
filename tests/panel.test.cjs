@@ -41,6 +41,8 @@ Object.assign(assets[6], { size: 0, missingSource: true });
 const state = { status: 'ready', revision: 1, dirty: false, outputDirectory: 'D:/out', result: { summary: { assets: 201, prefabs: 201, references: 102, errors: 1, warnings: 100, totalSourceBytes: 1024 ** 3, sourceFiles: 200, unknownSizeFiles: 2 }, scannedAt: '2026-11-18T08:00:00.000Z', limitations: ['动态加载未覆盖'] } };
 const malicious = '<img src=x onerror=alert(1)>';
 const issues = Array.from({ length: 101 }, (_, i) => ({ id: `issue-${i}`, severity: 'warning', code: 'MISSING', message: i ? `issue ${i}` : malicious, sourceUuid: 'uuid-0', sourceUrl: assets[0].url, nodePath: 'Root/Child', component: 'cc.Sprite', property: 'spriteFrame', nodeId: 'node-id', nodeLocator: { version: 1, segments: [{ name: 'Root', fileId: 'root-file-id' }] }, prefabTarget: { localID: ['component-file-id'] } }));
+Object.assign(issues[1], { category: 'typescript', code: 'TS2322', line: 3, column: 7 });
+state.result.scriptCheck = { status: 'checked', totalFiles: 2, checkedFiles: 1, excludedFiles: 1, errors: 1, warnings: 0, compilerVersion: '4.9.5', partial: false };
 const calls = []; let oldResolve, oldRequested = false, oldAssetsResolve, oldSizesResolve;
 const sizeStats = totalBytes => ({ totalBytes, totalFiles: 201, unknownFiles: 2, byType: [{ type: 'image', count: 100, bytes: totalBytes / 2 }, { type: 'prefab', count: 101, bytes: totalBytes / 2 }], largestAssets: Array.from({ length: 201 }, (_, i) => ({ ...assets[5], name: i === 0 ? malicious : `large-${i}`, type: i < 100 ? 'image' : 'cc.Prefab' })), largestThresholdBytes: 50 * 1024, partial: true, scope: 'source-files' });
 const messageRequest = async (name, message, args) => {
@@ -86,6 +88,12 @@ test('panel bounds DOM, escapes data, rejects stale responses, locates nodes and
   assert.equal(q('#assets').querySelectorAll('.asset-item').length, 200, 'asset DOM cap');
   assert.equal(q('#issue-table').querySelectorAll('tr').length, 101, '100 issues plus header');
   assert(q('#issue-table').textContent.includes(malicious), 'hostile text remains text');
+  assert(q('#issue-table').textContent.includes('第 3 行，第 7 列'));
+  assert(q('#script-summary').textContent.includes('已检查语法和类型'));
+  assert(q('#script-summary').textContent.includes('TypeScript 4.9.5'));
+  q('#issue-category').value = 'typescript'; q('#issue-category').dispatch('change'); await flush();
+  assert.equal(calls.filter(call => call.message === 'query-issues').at(-1).args.category, 'typescript');
+  q('#issue-category').value = ''; q('#issue-category').dispatch('change'); await flush();
   assert.equal(q('#issue-table').querySelectorAll('img').length, 0);
   assert.equal(q('#asset-next').disabled, false);
   assert(q('#metrics').textContent.includes('源资源总大小1 GiB'));
@@ -185,6 +193,9 @@ test('panel bounds DOM, escapes data, rejects stale responses, locates nodes and
   assert.equal(sizeType().querySelectorAll('option').length, 1);
   assert(q('#size-body').textContent.includes('没有大于 50 KB 的源资源'));
   q('#export-html').dispatch('click'); await flush(); assert(q('#status').textContent.includes('D:/out/report.html'));
+  state.result.scriptCheck.status = 'syntax-only'; state.result.scriptCheck.partial = true; await firePoll();
+  assert(q('#script-summary').textContent.includes('仅检查语法'));
+  assert(q('#script-summary').textContent.includes('检查不完整'));
   panel.close.call(instance); await flush(); assert.equal(timers.size, 0); assert.equal(q('#assets').childNodes.length, 0); assert.equal(q('#size-body').childNodes.length, 0);
   assert.equal(q('#unused-table').childNodes.length, 0);
   const callsAfterClose = calls.length; q('#scan').dispatch('click'); await flush(); assert.equal(calls.length, callsAfterClose);

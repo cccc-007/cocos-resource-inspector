@@ -11,7 +11,7 @@ let status = 'idle', progress, lastError, dirty = false;
 
 function getState() {
     return { status, progress, revision, dirty, error: lastError, outputDirectory: outputDirectory(__dirname),
-        result: store ? { summary: store.result.summary, scannedAt: store.result.scannedAt, limitations: store.result.limitations.slice(0, 100),
+        result: store ? { summary: store.result.summary, scriptCheck: store.result.scriptCheck, scannedAt: store.result.scannedAt, limitations: store.result.limitations.slice(0, 100),
             limitationsTotal: store.result.limitations.length } : undefined };
 }
 function invalidate() { changes++; if (store || status === 'scanning') dirty = true; }

@@ -93,14 +93,14 @@ module.exports = Editor.Panel.define({
       cell.append(el('span', 'cell-title', record.sourceUrl || record.sourceUuid || '—'));
       if (record.sourceUuid) cell.append(el('small', 'code', record.sourceUuid));
       const actions = el('div', 'row-actions');
-      if (record.sourceUuid || record.sourceUrl) actions.append(actionButton('定位资源', () => locateAsset({ uuid: record.sourceUuid, url: record.sourceUrl })));
+      if (record.sourceUuid) actions.append(actionButton('定位资源', () => locateAsset({ uuid: record.sourceUuid, url: record.sourceUrl })));
       if (record.sourceUuid && record.nodePath) actions.append(actionButton('定位节点', () => locateNode(record)));
       if (actions.childNodes.length) cell.append(actions);
       return cell;
     };
     const positionCell = record => {
       const cell = el('td');
-      cell.append(el('span', 'cell-title', record.nodePath || '—'));
+      cell.append(el('span', 'cell-title', record.line ? `第 ${record.line} 行，第 ${record.column || 1} 列` : record.nodePath || '—'));
       if (record.component) cell.append(el('small', '', `组件：${record.component}`));
       if (record.property) cell.append(el('small', 'code', `属性：${record.property}`));
       return cell;
@@ -164,13 +164,13 @@ module.exports = Editor.Panel.define({
       if (closed || activeTab !== 'issues') return;
       if (!hasResult()) { empty(q('#issue-table'), '扫描后显示检查结果'); resetPager('issue'); return; }
       try {
-        const response = await request('query-issues', { query: q('#issue-search').value.trim(), severity: q('#severity').value || undefined, page: issuePage, pageSize: ROW_PAGE_SIZE });
+        const response = await request('query-issues', { query: q('#issue-search').value.trim(), severity: q('#severity').value || undefined, category: q('#issue-category').value, page: issuePage, pageSize: ROW_PAGE_SIZE });
         if (closed || epoch !== epochs.issues || activeTab !== 'issues') return;
         issuePage = pageInfo('issue', response);
         q('#issue-total').textContent = `${count(response.total)} 条问题`;
         const items = Array.isArray(response.items) ? response.items.slice(0, ROW_PAGE_SIZE) : [];
         if (!items.length) { empty(q('#issue-table'), '当前筛选下没有发现问题；动态引用仍需结合项目逻辑检查。'); return; }
-        const { table, body } = makeTable(['级别 / 检查项', '问题说明', '来源资源', '节点 / 组件 / 属性']);
+        const { table, body } = makeTable(['级别 / 检查项', '问题说明', '来源资源', '行列 / 节点 / 组件 / 属性']);
         const labels = { error: '错误', critical: '错误', warning: '警告', info: '提示' };
         for (const issue of items) {
           const row = el('tr'), severity = el('td'), message = el('td');
@@ -385,6 +385,11 @@ module.exports = Editor.Panel.define({
       }
       q('#output-directory').textContent = state && state.outputDirectory || '—';
       q('#scanned-at').textContent = formatDate(result && result.scannedAt);
+      const scripts = result && result.scriptCheck;
+      const scriptLabels = { 'no-files': '没有 TS 文件', checked: '已检查语法和类型', 'syntax-only': '仅检查语法', unavailable: '未找到编译器，未检查', failed: '检查失败', cancelled: '检查已取消' };
+      q('#script-summary').textContent = scripts
+        ? `TS 脚本：${scriptLabels[scripts.status] || '未检查'}${scripts.partial ? '（检查不完整，详见覆盖限制）' : ''} · 已检查 ${count(scripts.checkedFiles)} / ${count(scripts.totalFiles)} 个文件 · 配置排除 ${count(scripts.excludedFiles)} 个 · ${count(scripts.errors)} 个错误，${count(scripts.warnings)} 个警告${scripts.compilerVersion ? ` · TypeScript ${scripts.compilerVersion}` : ''}`
+        : '扫描时检查 TS 脚本；配置缺失或无效时仅检查语法。';
       const summary = result && result.summary || {};
       const number = (keys, fallback) => {
         for (const key of keys) if (typeof summary[key] === 'number') return summary[key];
@@ -460,6 +465,7 @@ module.exports = Editor.Panel.define({
     on(q('#asset-sort'), 'change', () => { assetPage = 1; void loadAssets(); });
     on(q('#issue-search'), 'input', () => { ++epochs.issues; issuePage = 1; debounce('issues', loadIssues); });
     on(q('#severity'), 'change', () => { issuePage = 1; void loadIssues(); });
+    on(q('#issue-category'), 'change', () => { issuePage = 1; void loadIssues(); });
     on(q('#unused-search'), 'input', () => { ++epochs.unused; unusedPage = 1; debounce('unused', loadUnused); });
     for (const selector of ['#unused-status', '#unused-category']) on(q(selector), 'change', () => { unusedPage = 1; void loadUnused(); });
     on(q('#unused-prev'), 'click', () => { unusedPage = Math.max(1, unusedPage - 1); void loadUnused(); });

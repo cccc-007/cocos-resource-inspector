@@ -1,8 +1,8 @@
 {
   "name": "cocos-resource-inspector",
   "package_version": 2,
-  "version": "1.2.2",
-  "description": "资源与 Prefab 体检：未使用图片、音频和动画检测、引用定位、丢失引用检查、删除影响预览、资源大小统计",
+  "version": "1.3.0",
+  "description": "资源与 Prefab 体检：未使用图片、音频和动画检测、引用定位、丢失引用检查、TS 脚本报错检查、删除影响预览、资源大小统计",
   "author": "Cocos Resource Inspector",
   "license": "MIT",
   "editor": ">=3.8.0 <3.9.0",
@@ -42,5 +42,6 @@
       "locate-node": { "methods": ["locateNode"] },
       "export-report": { "methods": ["exportReport"] }
     }
-  }
+  },
+  "devDependencies": { "typescript": "4.9.5" }
 }

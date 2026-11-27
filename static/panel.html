@@ -33,7 +33,8 @@
         <div class="pagination"><button id="unused-prev" disabled>上一页</button><span id="unused-page">0 / 0</span><button id="unused-next" disabled>下一页</button></div>
       </section>
       <section id="issues" class="tab-content" role="tabpanel" aria-labelledby="tab-issues">
-        <div class="toolbar filters"><label class="sr-only" for="issue-search">搜索体检问题</label><input id="issue-search" type="search" placeholder="搜索问题、路径或节点" autocomplete="off"><label class="sr-only" for="severity">问题级别</label><select id="severity"><option value="">全部级别</option><option value="error">错误</option><option value="warning">警告</option><option value="info">提示</option></select><span id="issue-total" class="muted">0 条问题</span></div>
+        <p id="script-summary" class="helper">扫描时检查 TS 脚本；配置缺失或无效时仅检查语法。</p>
+        <div class="toolbar filters"><label class="sr-only" for="issue-search">搜索体检问题</label><input id="issue-search" type="search" placeholder="搜索问题、TS 错误码、路径或节点" autocomplete="off"><label class="sr-only" for="issue-category">检查类型</label><select id="issue-category"><option value="">全部问题</option><option value="typescript">TS 脚本</option><option value="resource">资源问题</option></select><label class="sr-only" for="severity">问题级别</label><select id="severity"><option value="">全部级别</option><option value="error">错误</option><option value="warning">警告</option><option value="info">提示</option></select><span id="issue-total" class="muted">0 条问题</span></div>
         <div id="issue-table" class="table-region"><div class="empty">扫描后显示检查结果</div></div>
         <div class="pagination"><button id="issue-prev" disabled>上一页</button><span id="issue-page">0 / 0</span><button id="issue-next" disabled>下一页</button></div>
       </section>

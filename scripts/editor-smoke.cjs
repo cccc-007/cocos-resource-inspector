@@ -21,12 +21,16 @@ async function run() {
     copyDirectory(source, installed);
     const assetsPath = path.join(temporary, 'assets');
     fs.mkdirSync(assetsPath);
+    fs.mkdirSync(path.join(temporary, 'tmp'));
+    fs.writeFileSync(path.join(temporary, 'tsconfig.json'), JSON.stringify({ extends: './tmp/tsconfig.cocos.json' }));
+    fs.writeFileSync(path.join(temporary, 'tmp/tsconfig.cocos.json'), JSON.stringify({ compilerOptions: { target: 'ES2017', module: 'ESNext', strict: true }, include: ['../assets/**/*.ts', './cc.d.ts'] }));
+    fs.writeFileSync(path.join(temporary, 'tmp/cc.d.ts'), 'declare module "cc" { export class Component {} } declare function playSound(name: string): void;');
     const image = '12345678-1234-4234-8234-123456789abc', prefab = 'abcdef12-1234-4234-8234-123456789abc', frame = image + '@f9941';
     fs.writeFileSync(path.join(assetsPath, 'image.png'), Buffer.alloc(50 * 1024 + 1));
     fs.writeFileSync(path.join(assetsPath, 'image.png.meta'), JSON.stringify({ uuid: image, importer: 'image', subMetas: { f9941: { uuid: frame, importer: 'sprite-frame' } } }));
     const audio = '12345678-1234-4234-8234-123456789abd', unusedAudio = '12345678-1234-4234-8234-123456789abe';
     for (const [filename, uuid] of [['sound.mp3', audio], ['unused.mp3', unusedAudio], ['Audio.ts', '12345678-1234-4234-8234-123456789abf']]) {
-        fs.writeFileSync(path.join(assetsPath, filename), filename.endsWith('.ts') ? "playSound('sound');" : Buffer.from([0, 255, 1]));
+        fs.writeFileSync(path.join(assetsPath, filename), filename.endsWith('.ts') ? "import { Component } from 'cc'; export class Audio extends Component { start() { playSound('sound'); } }" : Buffer.from([0, 255, 1]));
         fs.writeFileSync(path.join(assetsPath, filename + '.meta'), JSON.stringify({ uuid, importer: filename.endsWith('.ts') ? 'typescript' : 'audio-clip' }));
     }
     fs.writeFileSync(path.join(assetsPath, 'Example.prefab.meta'), JSON.stringify({ uuid: prefab, importer: 'prefab' }));
@@ -58,6 +62,8 @@ async function run() {
     assert.equal(state.status, 'ready', state.error || '扫描超时');
     assert.equal(state.result.summary.errors, 0);
     assert.equal(state.result.summary.warnings, 0);
+    assert.equal(state.result.scriptCheck.status, 'checked');
+    assert.equal(state.result.scriptCheck.checkedFiles, 1);
     assert.equal(extension.methods.queryReferences({ uuid: image, direction: 'incoming' }).total, 1);
     assert.equal(extension.methods.getImpact({ uuid: image }).direct[0].uuid, prefab);
     assert.equal(extension.methods.queryUnusedAssets({ status: 'referenced', category: 'image' }).items[0].uuid, image);
@@ -95,10 +101,23 @@ async function run() {
         if (format === 'json') assert.equal(JSON.parse(contents).sizeStats.totalBytes, expectedBytes);
         else assert.ok(contents.includes('资源大小'));
     }
+    fs.appendFileSync(path.join(assetsPath, 'Audio.ts'), '\nexport const invalid: number = "wrong";');
+    assert.equal(extension.methods.scanProject().status, 'scanning');
+    const tsDeadline = Date.now() + 20000;
+    while (extension.methods.getState().status === 'scanning' && Date.now() < tsDeadline) await new Promise(resolve => setTimeout(resolve, 20));
+    const tsState = extension.methods.getState();
+    assert.equal(tsState.status, 'ready', tsState.error || 'TS 扫描超时');
+    assert.equal(tsState.result.summary.tsErrors, 1);
+    const tsIssue = extension.methods.queryIssues({ category: 'typescript' }).items[0];
+    assert.equal(tsIssue.code, 'TS2322');
+    assert.equal(tsIssue.line, 2);
+    assert.equal(tsIssue.column, 14);
+    assert.equal(tsIssue.sourceUrl, 'db://assets/Audio.ts');
+    assert.equal(fs.existsSync(path.join(assetsPath, 'Audio.js')), false);
     extension.unload(); extension = undefined;
     assert.equal(listeners.size, 0);
     console.log('EDITOR_RUNTIME_SMOKE_OK ' + JSON.stringify({ node: process.versions.node, electron: process.versions.electron, version: manifest.version,
-        checks: ['packaged-modules', 'panel-load', 'worker-scan', 'subasset-references', 'unused-queries', 'audio-name-references', 'prefab-node-location', 'prefab-override-location', 'deletion-impact', 'source-size-stats', 'size-sorting', 'invalidation', 'html-json-export', 'unload'] }));
+        checks: ['packaged-modules', 'panel-load', 'worker-scan', 'typescript-diagnostics', 'subasset-references', 'unused-queries', 'audio-name-references', 'prefab-node-location', 'prefab-override-location', 'deletion-impact', 'source-size-stats', 'size-sorting', 'invalidation', 'html-json-export', 'unload'] }));
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
     if (extension) extension.unload();
